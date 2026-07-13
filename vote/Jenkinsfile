@@ -1,67 +1,93 @@
-pipeline { 
-    agent none
-    stages{ 
-        stage('build'){ 
-            agent{
-                docker{
-                    image 'python:3.11-slim'
-                    args '--user root'
-                    }
-                    }
+pipeline {
 
-            steps{ 
-                echo 'Compiling vote app.' 
-                dir('vote'){
-            
-                        sh "pip install -r requirements.txt"
+  agent none
 
-                } 
-            } 
-        } 
-        stage('test'){ 
-           
-            agent {
-                docker{
-                    image 'python:3.11-slim'
-                    args '--user root'
-                    }
-                    }
-            steps{ 
-                echo 'Running Unit Tests on vote app.' 
-                dir('vote'){ 
-                   
-                        sh "pip install -r requirements.txt"
-                        sh 'nosetests -v'
-                        
-                        
-                } 
-            } 
-        } 
+  stages {
 
-      stage('docker-package'){
-          agent any
-         
-          steps{
-            echo 'Packaging wvoteorker app with docker'
-            script{
-              docker.withRegistry('https://index.docker.io/v1/', 'dockerlogin') {
-                  // ./vote is the path to the Dockerfile that Jenkins will find from the Github repo
-                  def voteImage = docker.build("xxxx/vote:v${env.BUILD_ID}", "./vote")
-                  voteImage.push()
-                  voteImage.push("${env.BRANCH_NAME}")
-                  voteImage.push("latest")
-              }
-            }
-          }
+    stage('build') {
+
+      when {
+        changeset "**/vote/**"
       }
 
-    } 
-    post {
-        always{
-            echo 'Pipeline for vote is complete'
+      agent {
+        docker {
+          image 'python:3.11-slim'
+          args '--user root'
         }
+      }
+
+      steps {
+        echo 'Installing vote application dependencies...'
+
+        dir('vote') {
+          sh 'pip install --no-cache-dir -r requirements.txt'
+        }
+      }
     }
 
-} 
+    stage('test') {
 
+      when {
+        changeset "**/vote/**"
+      }
 
+      agent {
+        docker {
+          image 'python:3.11-slim'
+          args '--user root'
+        }
+      }
+
+      steps {
+        echo 'Running unit tests on vote application...'
+
+        dir('vote') {
+          sh 'pip install --no-cache-dir -r requirements.txt'
+          sh 'nosetests -v'
+        }
+      }
+    }
+
+    stage('docker-package') {
+
+      when {
+        changeset "**/vote/**"
+      }
+
+      agent any
+
+      steps {
+        echo 'Packaging vote application with Docker...'
+
+        script {
+          docker.withRegistry(
+            'https://index.docker.io/v1/',
+            'dockerlogin'
+          ) {
+            /*
+             * Docker no permite "/" dentro de una etiqueta.
+             * feature/dockerbuild se convertirá en feature-dockerbuild.
+             */
+            def branchTag = env.BRANCH_NAME.replace('/', '-')
+
+            def voteImage = docker.build(
+              "arkelrak/vote:v${env.BUILD_ID}",
+              "./vote"
+            )
+
+            voteImage.push()
+            voteImage.push(branchTag)
+            voteImage.push("latest")
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      echo 'Multibranch pipeline for vote is completed.'
+    }
+  }
+}
